@@ -1,0 +1,144 @@
+#include <include.h>
+#include <ulib.h>
+#include <stdio.h>
+#include <hal.h>
+#include <string.h>
+#include "mbed.h"
+#include "basic_rf.h"
+#include "bmac.h"
+
+#define SEND
+//#define RECEIVE
+#define PRINT
+
+char tx_buf[RF_MAX_PAYLOAD_SIZE];
+char rx_buf[RF_MAX_PAYLOAD_SIZE];
+
+RF_RX_INFO rfRxInfo;
+RF_TX_INFO rfTxInfo;
+
+uint8_t rx_buf_empty = 1;
+
+// Counter for number of detected packets that have valid data
+static uint16_t rxContentSuccess = 0;
+// Counter for number of total detected packets
+static uint16_t rxTotal = 0;
+// Counter for number of detected packets from the preamble perspective, regardless of contents
+static uint16_t mrfRxISRcallbackCounter = 0;
+
+static int sentPackets = 0;
+
+Timer t = 0;
+
+DigitalIn sensor(p30);
+
+//DigitalOut led1(LED1);
+
+static int hit_flag;
+
+static int timeout_flag;
+
+
+// Count number of detected packets and toggle a pin for each packet
+void mrfIsrCallback()
+{		
+	mrfRxISRcallbackCounter++;
+	rx_buf_empty = 0;
+}
+
+int main(void) {		
+	rfRxInfo.pPayload = rx_buf;
+	rfRxInfo.max_length = RF_MAX_PAYLOAD_SIZE;
+	rf_init(&rfRxInfo, RADIO_CHANNEL, 0xFFFF, MAC_ADDR); //RX struct, channel, panId, myAddr
+	//rf_addr_decode_set_my_mac(0x0003); // function to set myAddr if not performed during init
+	//rf_data_mode();
+  rf_auto_ack_enable(); // enable if IEEE 802.15.4 ack packets are requested
+	//rf_auto_ack_disable();
+
+	return 0;
+}
+
+void rx_task () {
+  while (1)
+	{
+    // Wait until an RX packet is received
+    if(!rx_buf_empty)
+		{		
+			// Vuk: Rx content test
+			if (strncmp(rx_buf, "lit", 41) == 0)
+			{
+				//rxContentSuccess++;
+				t.start();
+				memset(rx_buf, 0, strlen(rx_buf));
+			}
+			rx_buf_empty = 1;
+		}
+  }
+}
+
+void tx_task () {
+	//sprintf (tx_buf, "Node1");
+	rfTxInfo.destAddr = 0xF00B; // destination node address
+	
+	int packetsToSend = 10;
+
+	while(packetsToSend!=0)
+	{
+		
+		if (hit_flag) {
+			hit_flag = 0;
+			timeout_flag = 0;
+			
+			
+			sprintf(tx_buf, "hit");
+			rfTxInfo.pPayload=tx_buf;
+			rfTxInfo.length=strlen(tx_buf);
+			rf_rx_off();
+			rf_tx_packet(&rfTxInfo);
+			rf_rx_on();
+			memset(tx_buf, 0, strlen(tx_buf));
+		
+			packetsToSend--;
+			//sentPackets++;
+		}
+		else if (timeout_flag) {
+			hit_flag = 0;
+			timeout_flag = 0;
+			
+			sprintf(tx_buf, "timeout");
+			rfTxInfo.pPayload=tx_buf;
+			rfTxInfo.length=strlen(tx_buf);
+			rf_rx_off();
+			rf_tx_packet(&rfTxInfo);
+			rf_rx_on();
+			memset(tx_buf, 0, strlen(tx_buf));
+		
+			packetsToSend--;
+			//sentPackets++;
+		}
+  }
+}
+
+void print_task () {
+	
+	
+	
+}
+
+void lit_task () {
+	
+	if (sensor) {
+
+		hit_flag = 1;
+		
+	}
+	
+	if(t.read() == 5.0) {
+	
+		timeout_flag = 1;
+		
+	}
+	
+	t.reset();
+	
+}
