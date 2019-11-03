@@ -11,12 +11,10 @@
 #include "mbed.h"
 #include "basic_rf.h"
 #include "bmac.h"
-#include "Timer.h"
 
-//#define SEND
+#define SEND
 #define RECEIVE
 #define PRINT
-
 
 nrk_task_type RX_TASK;
 NRK_STK rx_task_stack[NRK_APP_STACKSIZE];
@@ -42,14 +40,13 @@ uint8_t rx_buf_empty = 1;
 
 // Counter for number of detected packets that have valid data
 static uint16_t rxContentSuccess = 0;
-// Counter for number of total detected packets
-static uint16_t rxTotal = 0;
 // Counter for number of detected packets from the preamble perspective, regardless of contents
 static uint16_t mrfRxISRcallbackCounter = 0;
 
-static int score = 0;
-
+static int sentPackets = 0;
+static int score;
 static int feedback_flag = 1;
+static int count = 0;
 
 // Count number of detected packets and toggle a pin for each packet
 void mrfIsrCallback()
@@ -68,8 +65,8 @@ int main(void)
 	rf_init(&rfRxInfo, RADIO_CHANNEL, 0xFFFF, MAC_ADDR); //RX struct, channel, panId, myAddr
 	//rf_addr_decode_set_my_mac(0x0003); // function to set myAddr if not performed during init
 	//rf_data_mode();
-	rf_auto_ack_enable(); // enable if IEEE 802.15.4 ack packets are requested
-	//rf_auto_ack_disable();
+  //rf_auto_ack_enable(); // enable if IEEE 802.15.4 ack packets are requested
+	rf_auto_ack_disable();
 	
 	nrk_init();
 	nrk_create_taskset();
@@ -84,67 +81,88 @@ void rx_task ()
     // Wait until an RX packet is received
     if(!rx_buf_empty)
 		{		
-			// Vuk: Rx content test
-			if (strncmp(rx_buf, "hit", 41) == 0)
+			if (strncmp(rx_buf, "success", 7) == 0)
+			{
+				int speed;
+				if (rx_buf[8] != NULL && rx_buf[9] != NULL) {
+						char temp[3] = {rx_buf[7], rx_buf[8], rx_buf[9]};
+						speed = atoi(temp);
+						printf("temp1: %s ", temp);
+						printf("rx count: %d\n", speed);
+						memset(temp,0,strlen(temp));
+				}
+				else if (rx_buf[8] != NULL) {
+						char temp[2] = {rx_buf[7], rx_buf[8]};
+						speed = atoi(temp);
+						printf("temp2: %s", temp);
+						printf("rx count: %d\n", speed);
+						memset(temp,0,strlen(temp));
+				}
+				else {
+						speed = (int) rx_buf[7];
+						printf("rx count: %d\n", speed);				
+				}
+				nrk_led_toggle(BLUE_LED);
+				score += 10 * (200 - speed);
+				feedback_flag = 1;
+				rxContentSuccess++;
+			}
+			if (strncmp(rx_buf, "miss", 41) == 0)
 			{
 				nrk_led_toggle(BLUE_LED);
-				score += 100;
 				feedback_flag = 1;
-				//rxContentSuccess++;
+				rxContentSuccess++;
 			}
-			else if (strncmp(rx_buf, "miss", 41) == 0) {
-				feedback_flag = 1;
-			}
-			//rxTotal++;
 			memset(rx_buf,0,strlen(rx_buf));
 			rx_buf_empty = 1;
-		}
+			//wait(3); //works but causes delay in printing
+		}	
 		nrk_wait_until_next_period ();
   }
 }
 
 void tx_task ()
 {
+	
 	sprintf (tx_buf, "lit");
 	rfTxInfo.pPayload=tx_buf;
 	rfTxInfo.length=strlen(tx_buf);
 	rfTxInfo.destAddr = 0x000B; // destination node address
-	
 	int packetsToSend = 10;
-	int sentPackets = 0;
 	while(packetsToSend!=0)
 	{
-		if (feedback_flag) {
-		
+		int node = rand() % 3;
+		if (node == 0) {
+			rfTxInfo.destAddr = 0x000B;
+		}
+		else if (node == 1) {
+			rfTxInfo.destAddr = 0x00FB;
+		}
+		else {
+			rfTxInfo.destAddr = 0x0F0B;
+		}
+		if(feedback_flag) count++;
+		if (count == 30) {
 			rf_rx_off();
 			rf_tx_packet(&rfTxInfo);
 			rf_rx_on();
-			memset(tx_buf,0,strlen(tx_buf));
-		
 			nrk_led_toggle(ORANGE_LED);
-		
 			packetsToSend--;
 			sentPackets++;
-		
 			feedback_flag = 0;
-		}
-		
+			count = 0;
+		}	
     nrk_wait_until_next_period ();
   }
 }
 
 void print_task () {
-	
 	while(1) {
-		//printf("rx_buf: %s\n", rx_buf);
-//		memset(rx_buf,0,strlen(rx_buf));
-//		printf("Correct packets: %d\n", rxContentSuccess);
-//		printf("Total packets: %d\n", rxTotal);
-		//printf("Score: %d\n", score);
+		printf("Sent: %d; Received: %d; Score: %d\n", sentPackets, rxContentSuccess, score);
+		//printf("Received: %s(%d); Sent: %d; Score: %d\n", rx_buf, rxContentSuccess, sentPackets, score);
+		//memset(rx_buf, 0, strlen(rx_buf));
 		nrk_wait_until_next_period();
-		
 	}
-	
 }
 
 void nrk_create_taskset ()
